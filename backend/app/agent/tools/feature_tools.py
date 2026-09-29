@@ -224,7 +224,7 @@ _CATEGORICAL_SYNONYMS: Dict[str, Dict[str, str]] = {
     "Battery_Status": {
         "new": "New", "brand new": "New", "replaced": "New", "recently replaced": "New",
         "good": "Good", "gud": "Good", "fine": "Good", "ok": "Good", "okay": "Good", "healthy": "Good", "strong": "Good", "great": "Good",
-        "weak": "Weak", "wek": "Weak", "bad": "Weak", "low": "Weak", "dying": "Weak", "poor": "Weak", "dead": "Weak", "failing": "Weak",
+        "weak": "Weak", "wek": "Weak", "bad": "Weak", "low": "Weak", "poor": "Weak", "dead": "Weak", "failing": "Weak",
     },
     "Tire_Condition": {
         "new": "New", "brand new": "New", "replaced": "New", "recently replaced": "New",

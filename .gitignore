@@ -13,9 +13,9 @@ venv/
 env/
 
 # Environment
-.env
-.env.local
-.env.production
+
+.env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -53,3 +53,6 @@ client_secret*.json
 credentials.json
 *.pem
 token.json
+.env
+.env.*
+!.env.example

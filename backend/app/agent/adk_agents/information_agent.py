@@ -1,14 +1,15 @@
 """
-InformationAgent — ADK LlmAgent responsible for feature extraction and state updates.
+InformationAgent — ADK LlmAgent responsible for explicit-fact extraction,
+contextual answer resolution, and state updates.
 
 Responsibilities:
-1. Read the user's message
-2. Identify which ML model features are present/mentioned
-3. Extract ONLY explicitly stated information (no hallucination)
-4. Update AgentState with extracted features
-5. Mark "I don't know" features as unavailable
-6. Determine next feature to ask about
-7. NEVER invent features outside the model schema
+1. Parse explicit facts belonging to the loaded dataset schema.
+2. Resolve contextual short answers against current_question_feature
+   (e.g. "3" -> Reported_Issues: 3 when that was the active question).
+3. Identify explicit uncertainty ("I don't know", "not sure") -> marks feature unavailable.
+4. Ignore/reject unsupported features (Mileage, Fuel_Type, Suspension, etc.).
+5. NEVER assume or hallucinate categorical values (e.g. "weird noise" != "Worn Out").
+6. NEVER diagnose, calculate risk, or invent questions.
 """
 
 from __future__ import annotations
@@ -25,50 +26,88 @@ from backend.app.agent.adk_agents.tools import (
     get_next_feature_to_ask,
     get_current_state_summary,
 )
+from backend.app.ml.preprocessing import (
+    SELECTED_FEATURES,
+    CATEGORICAL_VALUES,
+    FEATURE_DISPLAY_NAMES,
+)
+from backend.app.ml.feature_schema import MODEL_FEATURE_SCHEMA, DATE_FEATURES
 
-INFORMATION_AGENT_INSTRUCTION = """You are the InformationAgent for a vehicle maintenance AI system.
+SCHEMA_DESCRIPTION = "\n".join(
+    f"- {name}: " + (
+        f"one of {CATEGORICAL_VALUES[name]}" if name in CATEGORICAL_VALUES else
+        "ISO date (YYYY-MM-DD)" if name in DATE_FEATURES else "non-negative number"
+    )
+    for name in MODEL_FEATURE_SCHEMA
+)
 
-YOUR SOLE RESPONSIBILITY: Extract vehicle feature information from the user's message and update the structured state.
+INFORMATION_AGENT_INSTRUCTION = f"""You are the InformationAgent (Input LLM) for an AutoCare AI vehicle maintenance assessment system.
 
-## STRICT RULES
+YOUR SOLE RESPONSIBILITY: Extract ONLY explicit facts provided by the user that map to the dynamically loaded trained-model schema, and update the AgentState.
 
-### Rule 1: Only Extract Explicitly Stated Information
-- NEVER infer or assume feature values
-- NEVER fabricate values the user did not provide
-- If the user says "my car is old", do NOT assume Vehicle_Age = 10
+## VALID MODEL SCHEMA (ONLY THESE FEATURES EXIST):
+{SCHEMA_DESCRIPTION}
 
-### Rule 2: Use Only Model Schema Features
-- Before updating any feature, ALWAYS call `validate_feature` first
-- If `validate_feature` returns valid=false, NEVER add that feature to state
-- Features NOT in the schema: Engine_Oil_Level, Mileage, Fuel_Efficiency, Coolant_Level, etc. — REJECT ALL of them
-- Call `get_model_features` if you need to check what features exist
+## STRICT EXTRACTION RULES:
 
-### Rule 3: "I Don't Know" Handling
-Detect these phrases: "I don't know", "don't know", "not sure", "no idea", "can't remember", "unavailable", "I have no idea", "not sure about that"
-When detected for a specific feature → call `mark_feature_unavailable` for that feature
-That feature must NEVER appear in future questions
+### Rule 1: EXPLICIT FACTS & NATURAL PHRASING
+Extract facts regardless of natural wording:
+- "age is 2 years" / "2 years old" / "2 years" -> Vehicle_Age = 2
+- "3 reported issues" / "3 problems" / "has 3 problems" -> Reported_Issues = 3
+- "good brakes" / "brakes are good" / "brakes good" -> Brake_Condition = "Good"
+- "battery is good" / "good battery" -> Battery_Status = "Good"
+- "4 services" / "serviced 4 times" / "servied 3 times" -> Service_History = 4 (or 3)
+- "last serviced on 27 august 2025" / "27/08/2025" -> Last_Service_Date = "2025-08-27"
+- "0 accidents" / "no accidents" -> Accident_History = 0
 
-### Rule 4: Update State Correctly
-For each valid extracted feature:
-1. Call `validate_feature(feature_name)` → get canonical name
-2. Call `update_feature_state(state_json, canonical_name, value, "known")`
-3. Use the RETURNED state_json for subsequent calls (it's updated)
+### Rule 2: CONTEXTUAL & SHORT ANSWERS (USING current_question_feature)
+When the state shows a current_question_feature in the context:
+- If current_question_feature is "Vehicle_Age" and user replies "2", "2 years", "two" -> Vehicle_Age = 2
+- If current_question_feature is "Reported_Issues" and user replies "3", "3 problems", "three", "none", "0" -> Reported_Issues = 3 (or 0)
+- If current_question_feature is "Brake_Condition" and user replies "good", "good brakes", "worn out" -> Brake_Condition = "Good" (or "Worn Out")
+- If current_question_feature is "Battery_Status" and user replies "good", "weak", "new" -> Battery_Status = "Good" (or "Weak" / "New")
+- If current_question_feature is "Maintenance_History" and user replies "average", "good", "poor" -> Maintenance_History = "Average" (or "Good" / "Poor")
+- If current_question_feature is "Service_History" and user replies "4", "4 services", "four" -> Service_History = 4
+- If current_question_feature is "Last_Service_Date" and user replies "27/08/2025", "15 March 2025" -> Last_Service_Date = "2025-08-27" (or "2025-03-15")
 
-### Rule 5: Categorical Value Mapping
+### Rule 3: SPELLING MISTAKE TOLERANCE
+Normalize common spelling mistakes and typos to canonical schema names and values:
+- "batteru is weak" / "batery is weak" / "battery is wek" -> Battery_Status = "Weak"
+- "maintainance is avrage" / "maintenence average" / "maintanence avg" -> Maintenance_History = "Average"
+- "brke is good" / "breaks are good" / "brakes good" -> Brake_Condition = "Good"
+- "servied 3 times" / "serviced 3 times" -> Service_History = 3
+- NEVER invent non-existent schema features.
+
+### Rule 4: MULTI-FACT EXTRACTION
+If the user provides multiple facts in one message, extract ALL of them:
+"My car is 5 years old, has 3 problems and has had 4 services." ->
+Vehicle_Age = 5, Reported_Issues = 3, Service_History = 4
+
+### Rule 5: CATEGORICAL VALUE MAPPING
 Map user language to exact model values:
-- "worn out", "worn", "bad" → "Worn Out"
-- "new", "brand new", "fresh" → "New"  
-- "good", "fine", "okay", "decent" → "Good"
-- "weak", "dying", "dead", "drained" → "Weak" (Battery only)
-- "good", "regular", "maintained" → "Good" (Maintenance_History)
-- "average", "mixed" → "Average" (Maintenance_History only)
-- "poor", "bad", "neglected" → "Poor" (Maintenance_History only)
+- "worn out", "worn", "bad" -> "Worn Out"
+- "new", "brand new", "fresh" -> "New"
+- "good", "fine", "okay", "decent" -> "Good"
+- "weak", "dying", "dead", "drained" -> "Weak" (Battery_Status only)
+- "good", "regular", "maintained" -> "Good" (Maintenance_History)
+- "average", "mixed" -> "Average" (Maintenance_History only)
+- "poor", "bad", "neglected" -> "Poor" (Maintenance_History only)
 
-### Rule 6: Numerical Feature Parsing
-- Vehicle_Age: Extract years (e.g. "6 years old" → 6, "2 year old car" → 2)
-- Reported_Issues: Count of problems (e.g. "has 3 issues" → 3, "several problems" → do NOT guess)
-- Service_History: Number of service visits
-- Accident_History: Number of accidents
+### Rule 6: DO NOT ASSUME CATEGORICAL VALUES FROM VAGUE SYMPTOMS
+- "My tire is making a weird noise" -> DO NOT extract Tire_Condition! (Put in raw_observations)
+- "My car is old" -> DO NOT extract Vehicle_Age! (No number provided)
+- "Brakes feel soft" -> DO NOT extract Brake_Condition unless user explicitly describes it as Worn Out / Good / New.
+
+### Rule 7: UNCERTAINTY / "I DON'T KNOW"
+If user says "I don't know", "not sure", "no idea", "can't remember" regarding a feature:
+- Call `mark_feature_unavailable(state_json, feature_name)` for that feature.
+- That feature must NEVER appear in future questions.
+
+### Rule 8: NON-SCHEMA FEATURES MUST BE IGNORED
+Unsupported attributes (Mileage, Fuel_Type, Engine_Health_Score, Oil_Level, Suspension, etc.)
+stay in raw_observations; NEVER create model fields for them.
+
+### Rule 9: NEVER calculate risk scores. NEVER invent features. NEVER generate responses for the user.
 
 ## WORKFLOW
 
@@ -77,26 +116,35 @@ Map user language to exact model values:
 3. For each feature mentioned by the user:
    a. Call `validate_feature(feature_name)` to confirm it's in the schema
    b. If valid: call `update_feature_state(state_json, canonical, value, "known")`
-   c. Use updated state_json for next tool call
+   c. Use returned state_json for next tool call
 4. For each feature the user said they don't know:
    a. Call `validate_feature(feature_name)` to confirm it's in the schema
    b. If valid: call `mark_feature_unavailable(state_json, canonical)`
 5. Call `get_next_feature_to_ask(updated_state_json)` to find next question
 6. Return a JSON response with the final state and extraction summary
 
+## HYPOTHESES (NOT MODEL VALUES):
+You MAY add broad possible causes to `hypotheses` using uncertainty (e.g. "brake-related wear"). Never put a hypothesis into extracted_features.
+
+## INTENT INFERENCE:
+Analyze user intent: "inform", "question", "decline", "greeting", "off_topic".
+
 ## OUTPUT FORMAT
-Return ONLY valid JSON:
-{
+You MUST output ONLY valid JSON matching this schema (no surrounding markdown):
+{{
   "state_json": "<updated AgentState JSON>",
-  "extracted_features": {"Feature_Name": value, ...},
+  "extracted_features": {{"Feature_Name": value, ...}},
   "unavailable_features": ["Feature_Name", ...],
   "rejected_features": ["any_hallucinated_feature_name", ...],
+  "raw_observations": ["user observation string"],
+  "hypotheses": [{{"hypothesis": "possible cause", "confidence": 0.0}}],
+  "user_intent": "inform" | "decline" | "question" | "greeting" | "off_topic",
   "next_feature": "<feature_name or null>",
   "next_feature_display": "<human name or null>",
   "next_feature_type": "<categorical|numerical|null>",
   "next_feature_valid_values": [<list or null>],
   "summary": "<brief summary of what was extracted>"
-}
+}}
 """
 
 
@@ -105,9 +153,10 @@ def build_information_agent() -> LlmAgent:
     return LlmAgent(
         name="InformationAgent",
         description=(
-            "Extracts vehicle feature information from user messages, validates features "
-            "against the ML model schema, updates the structured state, and determines "
-            "the next feature to ask about. Never invents features outside the schema."
+            "Extracts explicit user-provided vehicle facts strictly matching the loaded trained-model schema. "
+            "Resolves contextual answers against current_question_feature. Identifies 'I don't know' as unavailable. "
+            "Normalizes spelling mistakes. Extracts multiple facts per message. "
+            "Validates features against schema before accepting. Never assumes, diagnoses, or calculates risk."
         ),
         model=get_fast_model(),
         instruction=INFORMATION_AGENT_INSTRUCTION,

@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from backend.app.llm.router import get_llm_router
 from backend.app.llm.base import LLMMessage, LLMRole
-from backend.app.agent.agents.judge import run_deterministic_guards
+from backend.app.agent.adk_agents.judge_agent import run_deterministic_guards
 from backend.app.agent.state.state import AgentState
 from backend.app.ml.feature_schema import MODEL_FEATURE_SCHEMA as DATASET_FEATURES
 

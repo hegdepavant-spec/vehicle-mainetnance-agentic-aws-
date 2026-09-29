@@ -10,7 +10,7 @@ from backend.app.ml.explainer import (
     format_score_factors_text,
 )
 from backend.app.agent.tools.feature_tools import classify_post_assessment_intent
-from backend.app.agent.agents.judge import run_deterministic_guards, generate_deterministic_fallback_response
+from backend.app.agent.adk_agents.judge_agent import run_deterministic_guards, generate_deterministic_fallback_response
 
 
 async def run_tests():

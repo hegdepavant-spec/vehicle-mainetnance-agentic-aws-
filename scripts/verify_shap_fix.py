@@ -6,7 +6,7 @@ Verifies that SHAP produces a grounded answer, NOT the fallback message.
 from backend.app.agent.state.state import AgentState
 from backend.app.ml.explainer import get_local_explainer, explanation_for_ui
 from backend.app.agent.tools.feature_tools import classify_post_assessment_intent
-from backend.app.agent.agents.judge import generate_deterministic_fallback_response
+from backend.app.agent.adk_agents.judge_agent import generate_deterministic_fallback_response
 
 # Build the exact state from the failing test case
 state = AgentState("test-shap-fix")

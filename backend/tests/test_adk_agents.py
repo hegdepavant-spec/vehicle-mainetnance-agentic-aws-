@@ -43,14 +43,14 @@ from backend.app.agent.tools.feature_tools import (
     extract_explicit_facts,
 )
 from backend.app.agent.tools.prediction_tools import execute_prediction_gate
-from backend.app.agent.agents.input import build_input_agent
-from backend.app.agent.agents.response import build_response_agent
-from backend.app.agent.agents.judge import (
+from backend.app.agent.adk_agents.information_agent import build_information_agent
+from backend.app.agent.adk_agents.response_agent import build_response_agent
+from backend.app.agent.adk_agents.judge_agent import (
     build_judge_agent,
     run_deterministic_guards,
     generate_deterministic_fallback_response,
 )
-from backend.app.agent.agents.controller import build_controller_agent
+from backend.app.agent.adk_agents.controller_agent import build_controller_agent
 from backend.app.agent.domain_guard import DomainGuard
 from backend.app.ml.preprocessing import (
     SELECTED_FEATURES,
@@ -75,10 +75,10 @@ class TestADKAgentInitialization:
         assert controller.name == "ControllerAgent"
         assert len(controller.tools) >= 3  # InputAgent, ResponseAgent, JudgeAgent
 
-    def test_input_agent_structure(self):
-        input_agent = build_input_agent()
-        assert input_agent.name == "InputAgent"
-        assert input_agent.output_key == "extraction_result"
+    def test_information_agent_structure(self):
+        information_agent = build_information_agent()
+        assert information_agent.name == "InformationAgent"
+        assert information_agent.output_key == "information_result"
 
     def test_response_agent_structure(self):
         response_agent = build_response_agent()

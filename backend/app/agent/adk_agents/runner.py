@@ -66,7 +66,7 @@ from backend.app.agent.feature_ranking import feature_ranking_engine
 from backend.app.agent.hypothesis_grounding import (
     normalise_hypotheses, ground_hypotheses, grounded_features,
 )
-from backend.app.agent.agents.judge import (
+from backend.app.agent.adk_agents.judge_agent import (
     run_deterministic_guards,
     generate_deterministic_fallback_response,
 )
@@ -93,7 +93,7 @@ class ADKAgentRunner:
         self._session_service = InMemorySessionService()
 
         self._controller_runner: Optional[Runner] = None
-        self._input_runner: Optional[Runner] = None
+        self._information_runner: Optional[Runner] = None
         self._response_runner: Optional[Runner] = None
         self._judge_runner: Optional[Runner] = None
         self._initialized = False
@@ -105,13 +105,13 @@ class ADKAgentRunner:
 
         logger.info("[ADK] Initializing Google ADK agents and runners...")
 
-        from backend.app.agent.agents.controller import build_controller_agent
-        from backend.app.agent.agents.input import build_input_agent
-        from backend.app.agent.agents.response import build_response_agent
-        from backend.app.agent.agents.judge import build_judge_agent
+        from backend.app.agent.adk_agents.controller_agent import build_controller_agent
+        from backend.app.agent.adk_agents.information_agent import build_information_agent
+        from backend.app.agent.adk_agents.response_agent import build_response_agent
+        from backend.app.agent.adk_agents.judge_agent import build_judge_agent
 
         controller_agent = build_controller_agent()
-        input_agent = build_input_agent()
+        information_agent = build_information_agent()
         response_agent = build_response_agent()
         judge_agent = build_judge_agent()
 
@@ -120,9 +120,9 @@ class ADKAgentRunner:
             app_name=APP_NAME,
             session_service=self._session_service,
         )
-        self._input_runner = Runner(
-            agent=input_agent,
-            app_name=APP_NAME + "_input",
+        self._information_runner = Runner(
+            agent=information_agent,
+            app_name=APP_NAME + "_information",
             session_service=InMemorySessionService(),
         )
         self._response_runner = Runner(
@@ -137,7 +137,7 @@ class ADKAgentRunner:
         )
 
         self._initialized = True
-        logger.info("[ADK] Multi-Agent System Initialized: ControllerAgent, InputAgent, ResponseAgent, JudgeAgent.")
+        logger.info("[ADK] Multi-Agent System Initialized: ControllerAgent, InformationAgent, ResponseAgent, JudgeAgent.")
 
     async def run_turn(
         self,
@@ -371,9 +371,9 @@ class ADKAgentRunner:
             "recent_history": remaining_history[-self.context_mgr.recent_messages_limit:],
         }
 
-        logger.info("[INPUT_AGENT_START]")
-        llm_extraction = await self._run_input_agent(input_context)
-        logger.info("[INPUT_AGENT_COMPLETE]")
+        logger.info("[INFORMATION_AGENT_START]")
+        llm_extraction = await self._run_information_agent(input_context)
+        logger.info("[INFORMATION_AGENT_COMPLETE]")
 
         extraction_data = constrain_extraction_to_explicit_facts(
             llm_extraction, user_message, active_question_feature
@@ -700,11 +700,20 @@ class ADKAgentRunner:
     # ---------------------------------------------------------------------------
 
     async def _run_input_agent(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Run InputAgent (Input LLM) to extract structured facts."""
-        session_id = f"input_{uuid.uuid4().hex[:8]}"
+        """Backward-compatible delegate for _run_information_agent."""
+        return await self._run_information_agent_impl(context)
+
+    async def _run_information_agent(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Run InformationAgent (Input LLM) to extract structured facts."""
+        if "_run_input_agent" in self.__dict__:
+            return await self._run_input_agent(context)
+        return await self._run_information_agent_impl(context)
+
+    async def _run_information_agent_impl(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        session_id = f"information_{uuid.uuid4().hex[:8]}"
         try:
-            await self._input_runner.session_service.create_session(
-                app_name=APP_NAME + "_input",
+            await self._information_runner.session_service.create_session(
+                app_name=APP_NAME + "_information",
                 user_id="user",
                 session_id=session_id,
                 state={},
@@ -719,14 +728,14 @@ class ADKAgentRunner:
 
         try:
             raw_output = await asyncio.wait_for(
-                self._collect_agent_response(self._input_runner, session_id, adk_input),
+                self._collect_agent_response(self._information_runner, session_id, adk_input),
                 timeout=15.0,
             )
         except asyncio.TimeoutError:
-            logger.warning("[INPUT] InputAgent timed out after 15s — falling back to deterministic extraction")
+            logger.warning("[INFORMATION] InformationAgent timed out after 15s — falling back to deterministic extraction")
             raw_output = ""
         except Exception as e:
-            logger.exception(f"[INPUT] InputAgent exception: {e}")
+            logger.exception(f"[INFORMATION] InformationAgent exception: {e}")
             raw_output = ""
 
         return self._parse_json_safely(raw_output, default={

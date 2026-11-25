@@ -376,7 +376,10 @@ class ADKAgentRunner:
         logger.info("[INFORMATION_AGENT_COMPLETE]")
 
         extraction_data = constrain_extraction_to_explicit_facts(
-            llm_extraction, user_message, active_question_feature
+            llm_extraction,
+            user_message,
+            active_question_feature,
+            conversation_history=remaining_history[-self.context_mgr.recent_messages_limit:],
         )
         logger.info("[INPUT] llm_extraction = %s", llm_extraction)
         logger.info("[INPUT] deterministic_extracted_facts = %s", extraction_data.get("extracted_features", []))
@@ -560,7 +563,7 @@ class ADKAgentRunner:
             "post_assessment_intent": explanation_intent,
             "known_features": agent_state.get_known_features(),
             "newly_confirmed": apply_summary["updated_features"],
-            "unavailable_features": list(agent_state.declined_features),
+            "unavailable_features": list(agent_state.declined_features | set(agent_state.raw_user_inputs.get("unavailable_features", []))),
             "prediction": result.get("prediction"),
             "local_explanation": local_expl,
             "next_feature_to_ask": next_feature,
@@ -570,6 +573,7 @@ class ADKAgentRunner:
             "prediction_available": prediction_available,
             "assessment_complete": agent_state.assessment_complete,
             "remaining_relevant_features": remaining_candidates,
+            "active_ambiguity": agent_state.active_ambiguity,
         }
         logger.info("[RESPONSE] state_signature = %s", agent_state.feature_state_signature())
         logger.info("[RESPONSE] context = %s", response_context)
@@ -583,6 +587,7 @@ class ADKAgentRunner:
                 agent_state, result.get("prediction"), next_feature,
                 post_assessment_intent=explanation_intent if explanation_intent in ("FACTOR_EXPLANATION", "RISK_EXPLANATION") else None,
                 local_explanation=local_expl,
+                active_ambiguity=agent_state.active_ambiguity,
             )
         agent_state.record_checkpoint(CHECKPOINT_RESPONSE_GENERATED)
 
@@ -608,6 +613,7 @@ class ADKAgentRunner:
                 agent_state, result.get("prediction"), next_feature,
                 post_assessment_intent=explanation_intent if explanation_intent in ("FACTOR_EXPLANATION", "RISK_EXPLANATION") else None,
                 local_explanation=local_expl,
+                active_ambiguity=agent_state.active_ambiguity,
             )
             judge_result = {
                 "score": 1,
@@ -635,6 +641,7 @@ class ADKAgentRunner:
                     agent_state, result.get("prediction"), next_feature,
                     post_assessment_intent=explanation_intent if explanation_intent in ("FACTOR_EXPLANATION", "RISK_EXPLANATION") else None,
                     local_explanation=local_expl,
+                    active_ambiguity=agent_state.active_ambiguity,
                 )
             else:
                 agent_state.record_checkpoint(CHECKPOINT_JUDGE_PASSED)

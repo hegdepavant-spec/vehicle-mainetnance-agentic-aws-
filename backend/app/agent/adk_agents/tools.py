@@ -169,7 +169,10 @@ def update_feature_state(
         parsed_value = value
         if canonical in NUMERICAL_FEATURES and status == "known":
             try:
-                parsed_value = int(float(str(value)))
+                if canonical == "Fuel_Efficiency":
+                    parsed_value = round(float(str(value)), 2)
+                else:
+                    parsed_value = int(float(str(value)))
             except (ValueError, TypeError):
                 return json.dumps({
                     "success": False,

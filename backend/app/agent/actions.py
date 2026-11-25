@@ -83,7 +83,10 @@ class AgentTools:
         from backend.app.ml.preprocessing import NUMERICAL_FEATURES
         if feature_name in NUMERICAL_FEATURES and status == "known":
             try:
-                value = int(value) if isinstance(value, (int, float, str)) else value
+                if feature_name == "Fuel_Efficiency":
+                    value = round(float(value), 2)
+                else:
+                    value = int(float(value)) if isinstance(value, (int, float, str)) else value
                 if not isinstance(value, (int, float)):
                     return {"success": False, "error": f"Expected number for {feature_name}"}
                 if value < 0:

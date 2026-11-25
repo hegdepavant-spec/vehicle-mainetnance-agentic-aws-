@@ -84,21 +84,40 @@ class RouterBackedModel(BaseLlm):
                 role_str = "assistant"
 
             text_parts: List[str] = []
+            tool_calls_list = []
             for part in (content.parts or []):
                 if part.text:
                     text_parts.append(part.text)
 
-                if part.function_response:
+                if getattr(part, "function_call", None):
+                    fc = part.function_call
+                    call_id = getattr(fc, "id", None) or f"call_{fc.name}"
+                    tool_calls_list.append({
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": fc.name,
+                            "arguments": json.dumps(getattr(fc, "args", {}) or {}),
+                        }
+                    })
+
+                if getattr(part, "function_response", None):
                     response = part.function_response
+                    call_id = getattr(response, "id", None) or f"call_{response.name}"
                     messages.append(LLMMessage(
                         role="tool",
                         name=response.name,
+                        tool_call_id=call_id,
                         content=json.dumps(response.response or {}),
                     ))
 
             combined_text = "\n".join(text_parts).strip()
-            if combined_text:
-                messages.append(LLMMessage(role=role_str, content=combined_text))
+            if combined_text or tool_calls_list or (role_str != "assistant" and not messages):
+                messages.append(LLMMessage(
+                    role=role_str,
+                    content=combined_text,
+                    tool_calls=tool_calls_list if tool_calls_list else None,
+                ))
 
         if not messages:
             messages.append(LLMMessage(role="user", content=""))
@@ -169,12 +188,13 @@ class RouterBackedModel(BaseLlm):
                 )
                 parts = [genai_types.Part(text=response.content)] if response.content else []
                 for tool_call in response.tool_calls or []:
+                    call_id = tool_call.get("id") or f"call_{tool_call['name']}"
                     try:
                         args = json.loads(tool_call.get("arguments") or "{}")
                     except json.JSONDecodeError:
                         args = {}
                     parts.append(genai_types.Part(function_call=genai_types.FunctionCall(
-                        name=tool_call["name"], args=args
+                        id=call_id, name=tool_call["name"], args=args
                     )))
                 yield ADKLlmResponse(
                     content=genai_types.Content(

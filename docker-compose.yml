@@ -1,69 +1,144 @@
-version: '3.8'
-
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: vm_backend
-    ports:
-      - "7860:7860"
-    environment:
-      - APP_ENV=production
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/vehicle_maintenance
-      - REDIS_URL=redis://redis:6379/0
-
-      - PRIMARY_LLM_PROVIDER=groq
-      - PRIMARY_LLM_MODEL=openai/gpt-oss-120b
-      - PRIMARY_LLM_API_KEY=${PRIMARY_LLM_API_KEY}
-      - PRIMARY_LLM_BASE_URL=https://api.groq.com/openai/v1
-
-      - SECONDARY_LLM_PROVIDER=groq
-      - SECONDARY_LLM_MODEL=qwen/qwen3.6-27b
-      - SECONDARY_LLM_API_KEY=${SECONDARY_LLM_API_KEY}
-      - SECONDARY_LLM_BASE_URL=https://api.groq.com/openai/v1
-    depends_on:
-      - redis
-
+  # ---------------------------------------------------------------------------
+  # Frontend — React SPA + Nginx Reverse Proxy (Single Public Gateway)
+  # ---------------------------------------------------------------------------
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
     container_name: vm_frontend
+    restart: unless-stopped
     ports:
-      - "3000:80"
+      - "80:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    networks:
+      - vm_network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q -O - http://127.0.0.1/nginx-health || exit 1" ]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # Backend — FastAPI, Google ADK Multi-Agent Runner & ML Inference Engine
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: vm_backend
+    restart: unless-stopped
+    expose:
+      - "7860"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - APP_SECRET_KEY=${APP_SECRET_KEY:-change-me-in-production}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=7860
+
+      # Database Configuration
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vehicle_maintenance}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vehicle_maintenance}
+
+      # Redis Configuration
+      - REDIS_URL=redis://redis:6379/0
+
+      # Primary LLM Provider
+      - PRIMARY_LLM_PROVIDER=${PRIMARY_LLM_PROVIDER:-groq}
+      - PRIMARY_LLM_MODEL=${PRIMARY_LLM_MODEL:-openai/gpt-oss-120b}
+      - PRIMARY_LLM_API_KEY=${PRIMARY_LLM_API_KEY}
+      - PRIMARY_LLM_BASE_URL=${PRIMARY_LLM_BASE_URL:-https://api.groq.com/openai/v1}
+
+      # Secondary LLM Provider (Failover)
+      - SECONDARY_LLM_PROVIDER=${SECONDARY_LLM_PROVIDER:-groq}
+      - SECONDARY_LLM_MODEL=${SECONDARY_LLM_MODEL:-qwen/qwen3.6-27b}
+      - SECONDARY_LLM_API_KEY=${SECONDARY_LLM_API_KEY}
+      - SECONDARY_LLM_BASE_URL=${SECONDARY_LLM_BASE_URL:-https://api.groq.com/openai/v1}
+
+      # Tertiary LLM Provider (Optional)
+      - TERTIARY_LLM_PROVIDER=${TERTIARY_LLM_PROVIDER:-}
+      - TERTIARY_LLM_MODEL=${TERTIARY_LLM_MODEL:-}
+      - TERTIARY_LLM_API_KEY=${TERTIARY_LLM_API_KEY:-}
+      - TERTIARY_LLM_BASE_URL=${TERTIARY_LLM_BASE_URL:-}
+
+      # ML Model File Paths inside container
+      - ML_MODEL_PATH=models/maintenance_model.joblib
+      - ML_PIPELINE_PATH=models/preprocessing_pipeline.joblib
+
+      # Google OAuth 2.0
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vm_network
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:7860/api/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — Primary Persistent Relational Database (Internal Only)
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: vm_postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: vehicle_maintenance
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-vehicle_maintenance}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - vm_network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vehicle_maintenance}" ]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # Redis — In-Memory Caching & Session Storage (Internal Only)
+  # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: vm_redis
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
+    networks:
+      - vm_network
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
+
+# -----------------------------------------------------------------------------
+# Internal Isolated Network & Persistent Volumes
+# -----------------------------------------------------------------------------
+networks:
+  vm_network:
+    driver: bridge
 
 volumes:
   postgres_data:

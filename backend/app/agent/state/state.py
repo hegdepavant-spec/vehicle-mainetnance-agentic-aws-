@@ -67,6 +67,7 @@ class AgentState:
         self.checkpoint_log: List[str] = []
         self.raw_observations: List[str] = []
         self.symptoms: Dict[str, str] = {}
+        self.replacement_history: Dict[str, str] = {}
         self.raw_user_inputs: Dict[str, Any] = {}
         # A conversation-specific, schema-bounded question plan.  It contains
         # names only from SELECTED_FEATURES and is never supplied by an LLM.
@@ -83,6 +84,9 @@ class AgentState:
         self.current_symptoms: List[str] = []
         self.current_hypotheses: List[Dict[str, Any]] = []
         self.grounded_hypotheses: List[Dict[str, Any]] = []
+        self.active_ambiguity: Optional[Dict[str, Any]] = None
+        self.temporal_candidates: Dict[str, Dict[str, Any]] = {}
+        self.entity_observations: Dict[str, Dict[str, Any]] = {}
 
         # Assessment lifecycle mode: "ASSESSMENT", "AWAITING_SUMMARY_CONFIRMATION", "SUMMARY", "FOLLOW_UP"
         self.assessment_mode: str = "ASSESSMENT"
@@ -143,6 +147,19 @@ class AgentState:
         if changed:
             if status == "known":
                 self.declined_features.discard(name)
+                # Clear unresolved uncertainty lists if present
+                for u_key in ("unknown_features", "unavailable_features", "pending_features"):
+                    u_list = self.raw_user_inputs.get(u_key)
+                    if isinstance(u_list, list) and name in u_list:
+                        self.raw_user_inputs[u_key] = [x for x in u_list if x != name]
+                # Clear active ambiguity if targeting this confirmed feature
+                if self.active_ambiguity and isinstance(self.active_ambiguity, dict) and self.active_ambiguity.get("feature") == name:
+                    self.active_ambiguity = None
+                if "ambiguities" in self.raw_user_inputs and isinstance(self.raw_user_inputs["ambiguities"], list):
+                    self.raw_user_inputs["ambiguities"] = [
+                        a for a in self.raw_user_inputs["ambiguities"]
+                        if not (isinstance(a, dict) and a.get("feature") == name)
+                    ]
                 # If this was the current question feature, clear it
                 if self.current_question_feature == name:
                     self.current_question_feature = None
@@ -151,7 +168,7 @@ class AgentState:
 
     def mark_declined(self, feature_name: str):
         """
-        Mark a feature as declined / unavailable ("I don't know").
+        Mark a feature as explicitly declined (user refuses to share).
         Guarantees this feature will NEVER be asked again.
         """
         if feature_name in self.feature_state:
@@ -159,6 +176,23 @@ class AgentState:
             self.feature_state[feature_name]["value"] = None
             self.declined_features.add(feature_name)
             self.asked_features.add(feature_name)
+            if self.active_ambiguity and isinstance(self.active_ambiguity, dict) and self.active_ambiguity.get("feature") == feature_name:
+                self.active_ambiguity = None
+            if self.current_question_feature == feature_name:
+                self.current_question_feature = None
+
+    def mark_unavailable(self, feature_name: str):
+        """
+        Mark a feature as unavailable (user cannot remember/provide).
+        Guarantees this feature will not be repeatedly requested,
+        while remaining independently decoupled from explicitly declined features.
+        """
+        if feature_name in self.feature_state:
+            self.feature_state[feature_name]["status"] = "unavailable"
+            self.feature_state[feature_name]["value"] = None
+            self.asked_features.add(feature_name)
+            if self.active_ambiguity and isinstance(self.active_ambiguity, dict) and self.active_ambiguity.get("feature") == feature_name:
+                self.active_ambiguity = None
             if self.current_question_feature == feature_name:
                 self.current_question_feature = None
 
@@ -192,10 +226,14 @@ class AgentState:
         self.asked_features.clear()
         self.declined_features.clear()
         self.current_question_feature = None
+        self.active_ambiguity = None
+        self.temporal_candidates = {}
+        self.entity_observations = {}
         self.predictions = []
         self.explanations = []
         self.raw_observations = []
         self.symptoms = {}
+        self.replacement_history = {}
         self.raw_user_inputs = {}
         self.selected_features = []
         self.assessment_plan_initialized = False
@@ -341,6 +379,10 @@ class AgentState:
             "current_symptoms": list(self.current_symptoms),
             "current_hypotheses": deepcopy(self.current_hypotheses),
             "grounded_hypotheses": deepcopy(self.grounded_hypotheses),
+            "active_ambiguity": deepcopy(self.active_ambiguity) if self.active_ambiguity else None,
+            "temporal_candidates": deepcopy(self.temporal_candidates),
+            "entity_observations": deepcopy(self.entity_observations),
+            "replacement_history": deepcopy(self.replacement_history),
         }
 
     def to_json(self) -> Dict[str, Any]:
@@ -370,6 +412,10 @@ class AgentState:
             "current_symptoms": list(self.current_symptoms),
             "current_hypotheses": deepcopy(self.current_hypotheses),
             "grounded_hypotheses": deepcopy(self.grounded_hypotheses),
+            "active_ambiguity": deepcopy(self.active_ambiguity),
+            "temporal_candidates": deepcopy(self.temporal_candidates),
+            "entity_observations": deepcopy(self.entity_observations),
+            "replacement_history": deepcopy(self.replacement_history),
         }
 
     @classmethod
@@ -386,6 +432,7 @@ class AgentState:
             state.asked_features = set(data.get("asked_features", []))
             state.declined_features = set(data.get("declined_features", []))
             state.current_question_feature = data.get("current_question_feature")
+            state.active_ambiguity = deepcopy(data.get("active_ambiguity")) if data.get("active_ambiguity") else None
             state.predictions = data.get("predictions", [])
             state.explanations = data.get("explanations", [])
             state.turn_count = data.get("turn_count", 0)
@@ -393,6 +440,7 @@ class AgentState:
             state.checkpoint_log = data.get("checkpoint_log", [])
             state.raw_observations = data.get("raw_observations", [])
             state.symptoms = data.get("symptoms", {})
+            state.replacement_history = data.get("replacement_history", {})
             state.raw_user_inputs = data.get("raw_user_inputs", {})
             state.selected_features = [
                 feature for feature in data.get("selected_features", [])
@@ -412,5 +460,7 @@ class AgentState:
             state.current_symptoms = data.get("current_symptoms", [])
             state.current_hypotheses = data.get("current_hypotheses", [])
             state.grounded_hypotheses = data.get("grounded_hypotheses", [])
+            state.temporal_candidates = deepcopy(data.get("temporal_candidates", {}))
+            state.entity_observations = deepcopy(data.get("entity_observations", {}))
         return state
 

@@ -110,6 +110,9 @@ YOUR SOLE RESPONSIBILITY: Format validated structured state into a natural, grou
 
 ### 8. MODE: "ASSESSMENT" (Normal Turn during interview):
 - Acknowledge input, mention why it matters, state risk if prediction available, ask single `next_feature_to_ask`.
+- ACTIVE TIMING CLARIFICATION: If `active_ambiguity` is present in the context with `type == "active_question_timing_clarification"`:
+  - Attempt 1: Acknowledge the user's service timing (e.g. "Thank you, I've noted that your vehicle was serviced recently.") and ask them to clarify maintenance quality: "To help me assess the maintenance risk accurately, would you describe that maintenance history overall as Good, Average, or Poor?"
+  - Attempt 2 (or more): Explain that service timing (when it was done) and maintenance quality (how well it has been maintained) are different details for the assessment. Ask them to rate maintenance history as Good, Average, or Poor, or let them know they can say "I don't know" or "skip".
 - ALWAYS call `get_next_feature_to_ask(state_json)` before asking a question — never ask about a feature not returned by this tool.
 - For categorical features, mention valid options naturally: "Is it new, in good condition, or worn out?"
 

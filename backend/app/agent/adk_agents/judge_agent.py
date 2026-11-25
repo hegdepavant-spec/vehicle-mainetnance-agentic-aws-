@@ -240,6 +240,7 @@ def generate_deterministic_fallback_response(
     next_feature: Optional[str],
     post_assessment_intent: Optional[str] = None,
     local_explanation: Optional[Dict[str, Any]] = None,
+    active_ambiguity: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Generate a 100% grounded, deterministic fallback response from confirmed state.
@@ -356,6 +357,33 @@ def generate_deterministic_fallback_response(
             f"The current model estimates a {risk} maintenance risk{score_pct}. "
             "Based on the details you've shared, your confirmed vehicle conditions have been recorded.\n\n"
             "Would you like to see a summary of the assessment and the factors that influenced the result?"
+        )
+
+    # 9. Active question timing / subjective condition clarification handling
+    amb = active_ambiguity or getattr(state, "active_ambiguity", None)
+    if amb and amb.get("feature") == next_feature and amb.get("type") == "active_question_timing_clarification":
+        recency = amb.get("recency", "recently")
+        attempt = amb.get("attempt", 1)
+        if attempt == 1:
+            return (
+                f"Thank you, I've noted that your vehicle was serviced {recency}. "
+                "To help me assess the maintenance risk accurately, would you describe that maintenance history overall as Good, Average, or Poor?"
+            )
+        else:
+            return (
+                f"I understand your service was done {recency}. "
+                "Service timing (when it was done) and maintenance quality (how well it has been maintained) are different details for the assessment. "
+                "Could you rate the overall maintenance history as Good, Average, or Poor? If you're not sure, feel free to say 'I don't know' or 'skip'."
+            )
+    elif amb and amb.get("feature") == next_feature and amb.get("type") == "subjective_condition_ambiguity":
+        feat = amb.get("feature")
+        from backend.app.ml.preprocessing import CATEGORICAL_VALUES
+        allowed = CATEGORICAL_VALUES.get(feat, [])
+        opts_str = ", ".join(allowed[:-1]) + ", or " + allowed[-1] if len(allowed) > 1 else str(allowed)
+        disp = FEATURE_DISPLAY_NAMES.get(feat, feat.replace("_", " "))
+        return (
+            f"You mentioned that the {disp.lower()} is somewhat aged or older. "
+            f"To evaluate your vehicle accurately, would you describe its current physical condition as {opts_str}?"
         )
 
     lines: List[str] = []

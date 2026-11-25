@@ -51,6 +51,10 @@ class OpenAICompatibleProvider(LLMProvider):
                     payload["name"] = message.name
                 if message.tool_call_id:
                     payload["tool_call_id"] = message.tool_call_id
+                if message.tool_calls:
+                    payload["tool_calls"] = message.tool_calls
+                    if not payload.get("content"):
+                        payload["content"] = None
                 api_messages.append(payload)
             
             kwargs = {

@@ -1,86 +1,158 @@
-# AutoCare AI — Complete Evaluation System Walkthrough
+# AutoCare AI — System & Universal NLP Walkthrough
 
-## Summary of Accomplishments
+## 1. System Overview
 
-A complete, isolated evaluation framework for **AutoCare AI** has been created and verified. The system measures real, non-fabricated metrics across:
-1. **ML Model Performance** (Random Forest inference on test split with scikit-learn metrics)
-2. **SHAP Local Explainability Quality** (TreeExplainer generation, top factor validity, feature schema compliance)
-3. **LLM Multi-Agent System Performance** (Input extraction, state consistency, dynamic questioning, dataset compliance, zero-hallucination rate, post-assessment routing)
-4. **Hard-Gated Evaluation Judge** (Strict gates against hallucinations, schema breaches, and state discrepancies)
-5. **Structured Multi-Tier Reporting** (Consolidated JSON, per-case raw traces, human-readable Markdown report)
+**AutoCare AI** is a production-grade, conversational vehicle maintenance assessment application powered by the **Google Agent Development Kit (ADK)** and an authoritative **Random Forest** machine learning model.
+
+### Key Architectural Tenet:
+> **The user never has to adapt to the model's schema or categorical vocabulary. The system understands the user in natural language, while deterministic gates guarantee strict ML model input safety.**
 
 ---
 
-## Zero Production Modification Verification
+## 2. Multi-Agent Architecture & Runtime Pipeline
 
-- **Production Prompts**: Unchanged
-- **Production Agents & Controllers**: Unchanged
-- **Production State & DB**: Unchanged (evaluation runs in isolated in-memory namespaces)
-- **Trained Models & Preprocessors**: Unchanged (reused directly)
-- **Existing Unit & Regression Tests**: 100% passing (`python scripts/run_tests.py` and `python scripts/test_all_regression_cases.py`)
-
----
-
-## File Manifest
-
-### Created Files
-| Path | Purpose |
-| :--- | :--- |
-| `evaluation/__init__.py` | Root evaluation package init |
-| `evaluation/run_evaluation.py` | Main CLI entrypoint supporting `--ml-only`, `--llm-only`, `--shap-only`, `--cases-limit` |
-| `evaluation/datasets/llm_eval_cases.json` | Dataset covering normal inputs, typos/spelling errors, short answers, multi-facts, state corrections |
-| `evaluation/datasets/hallucination_cases.json` | Adversarial dataset testing RUL queries, non-schema concepts, premature scores, causal failure claims |
-| `evaluation/datasets/question_cases.json` | Dataset testing dynamic questioning, dataset boundary compliance, and user uncertainty |
-| `evaluation/datasets/post_assessment_cases.json` | Dataset testing summary requests, factor explanations, risk explanations, and new assessments |
-| `evaluation/ml/__init__.py` | ML evaluation package init |
-| `evaluation/ml/metrics.py` | Sklearn and calibration metric calculators (ECE, Brier, ROC-AUC, PR-AUC, Confusion Matrix) |
-| `evaluation/ml/evaluate_model.py` | ML model evaluation harness reusing `models/maintenance_model.joblib` on `data/vehicle_maintenance_data.csv` |
-| `evaluation/shap/__init__.py` | SHAP evaluation package init |
-| `evaluation/shap/evaluate_explanations.py` | SHAP local explainer evaluation across varied feature sets |
-| `evaluation/llm/__init__.py` | LLM evaluation package init |
-| `evaluation/llm/judge.py` | Hard-gated Judge combining deterministic guards and LLM semantic judgment |
-| `evaluation/llm/runner.py` | Multi-turn isolated session runner executing test cases through ADK agents |
-| `evaluation/llm/metrics.py` | LLM metric aggregation and weighted score calculator |
-
-### Generated Reports
-| Report Path | Description |
-| :--- | :--- |
-| `evaluation/reports/ml_report.json` | Computed ML metrics on 7,500 test samples |
-| `evaluation/reports/shap_report.json` | Computed SHAP local explanation metrics |
-| `evaluation/reports/llm_report.json` | Computed LLM & agent performance rates |
-| `evaluation/reports/evaluation_report.json` | Consolidated machine-readable evaluation report |
-| `evaluation/reports/raw_results.json` | Full per-case evaluation traces and judge reasoning |
-| `evaluation/reports/evaluation_report.md` | Human-readable formatted Markdown report |
+```mermaid
+flowchart TD
+    User["User Message in Natural Language"] --> Runner["ADKAgentRunner"]
+    Runner --> DG["1. DomainGuard (Pre-LLM Safety & Domain Filter)"]
+    DG --> CM["2. ContextManager (Compaction & Session History)"]
+    CM --> InfoAgent["3. InformationAgent (Input LLM: Global Fact & Intent Extraction)"]
+    InfoAgent --> FT["4. FeatureTools (Deterministic Validation, Typo Correction & Pronoun Resolution)"]
+    FT --> State["5. AgentState (Known Features, Temporal Candidates, Symptoms, Replacements)"]
+    State --> FS["6. FeatureSelector & ControllerAgent (Select Next Most Predictive Feature)"]
+    FS --> PG{"7. Programmatic ML Gate (Known Features >= 2?)"}
+    PG -- Yes --> RF["Run ML Pipeline (RandomForest Inference & SHAP Explainer)"]
+    PG -- No --> Resp["8. ResponseAgent (Empathetic Service Advisor Output)"]
+    RF --> Resp
+    Resp --> Judge["9. JudgeAgent (Post-Turn Hallucination & Policy Verification)"]
+    Judge -- Pass --> Out["10. Deliver Response to User"]
+    Judge -- Fail --> Fallback["Deterministic Fallback Response"] --> Out
+```
 
 ---
 
-## Measured Evaluation Metrics
+## 3. Universal Natural-Language Intelligence Walkthrough
 
-### 1. ML Model (Random Forest on 7,500 Test Samples)
-- **Accuracy**: **96.45%**
-- **Precision**: **100.00%**
-- **Recall**: **95.62%**
-- **F1 Score**: **97.76%**
-- **ROC-AUC**: **1.0000**
-- **PR-AUC**: **1.0000**
-- **Expected Calibration Error (ECE)**: **0.1006**
-- **Brier Score**: **0.0360**
-- **Confusion Matrix**: `[[1425, 0], [266, 5809]]` (FP: 0, FN: 266)
+The conversational engine operates under the core principle:
+> **"Understand first. Extract second. Validate third. Update state fourth."**
 
-### 2. SHAP Explainability Quality
-- **Explanation Success Rate**: **100.00%** (6 / 6 test scenarios)
-- **Top Factor Validity Rate**: **100.00%**
-- **Schema Compliance Rate**: **100.00%**
+### Key Capabilities:
 
-### 3. LLM Multi-Agent System (36 Test Cases Evaluated)
-- **Input Extraction Accuracy**: **95.83%** (23 / 24 expected facts extracted across complex phrasing and typos)
-- **Question Relevance Rate**: **100.00%**
-- **Dataset Compliance Rate**: **100.00%**
-- **Faithfulness Rate**: **100.00%**
-- **State Consistency Rate**: **100.00%**
-- **Hallucination-Free Rate**: **100.00%**
-- **Response Relevance Rate**: **100.00%**
-- **Response Quality Rate**: **100.00%**
-- **Post-Assessment Routing Accuracy**: **100.00%**
-- **Overall Judge Pass Rate**: **97.22%** (35 / 36 passed hard gates)
-- **Overall LLM Score**: **100.00%**
+### A. Global Extraction (Unconstrained by Active Question)
+- The user is **never** forced to answer only what was asked.
+- If the AI asks about `Maintenance_History` and the user mentions *"I drove 45,000 kilometres and the car is 4 years old"*, the system extracts `Mileage = 45000` and `Vehicle_Age = 4`, while leaving `Maintenance_History` open for future turns.
+
+### B. Coreference & Pronoun Resolution Across Turns
+- Resolves anaphoric references (*"it"*, *"that"*, *"they"*) to antecedents in recent conversation history or the active question.
+- **Example**:
+  - AI asks: *"How would you describe your maintenance history?"*
+  - User: *"It was done a year ago."*
+  - The system resolves *"it"* $\rightarrow$ vehicle service event, logs service recency into `entity_observations`, generates a dynamic candidate interval into `temporal_candidates`, and keeps `Maintenance_History` open without incorrectly forcing it to `"Poor"` or `"Good"`.
+
+### C. Relative Temporal Understanding Without Synthetic Date Fabrication
+- Parses relative time expressions (*"one year ago"*, *"two years back"*, *"six months earlier"*, *"around Diwali"*, *"since last year"*, *"every six months"*) using dynamic runtime reference dates.
+- Relative intervals are stored in `state.temporal_candidates` and `state.entity_observations`.
+- **Safety guarantee**: Relative intervals are **never** fabricated into synthetic calendar dates in `feature_state["Last_Service_Date"]` (which strictly requires confirmed ISO `YYYY-MM-DD` dates).
+
+### D. Component Condition vs. Symptom vs. Replacement History
+- **Sensory Symptoms**: Descriptions like *"brakes feel spongy"*, *"brake pads squeaking"*, *"battery keeps dying"* are routed to `state.symptoms`. They are **never** mapped directly to physical wear categories like `Brake_Condition = "Worn Out"` or `Battery_Status = "Weak"`.
+- **Past Maintenance Actions**: Past replacements (*"replaced tyres 3 months ago"*) are routed to `state.replacement_history`. They **never** reset `Vehicle_Age` or fabricate `Tire_Condition = "New"`.
+- **Physical Wear**: Explicit descriptions of physical wear (*"brake pads are completely worn out"*, *"battery voltage is weak"*, *"tires have plenty of tread"*) map cleanly to canonical categories (`"New"`, `"Good"`, `"Worn Out"`, `"Weak"`).
+
+### E. Automotive Typo Tolerance with Standard Library Fallback
+- Normalizes spelling mistakes (*"battry"*, *"braks"*, *"servisd"*, *"maintanence"*, *"agoo"*) using RapidFuzz token matching against domain targets.
+- Includes a resilient fallback to Python's standard library `difflib.SequenceMatcher` so the system never fails if dependencies are missing.
+- Strictly preserves valid English syntax and vocabulary (`"stick shift"`, `"maintenance is good"`).
+
+### F. Target-Specific Uncertainty vs. Active Question Uncertainty
+- If the AI asks about `Maintenance_History` and the user says: *"I don't know when the battery was replaced"*, the system recognizes the uncertainty targets battery replacement history.
+- The active question (`Maintenance_History`) remains unresolved and is **not** marked unknown.
+
+---
+
+## 4. Specification Examples Verification
+
+The 5 exact examples from the Universal NLP specification are validated and verified:
+
+```text
+Example A:
+User: "I replaced my tyres one year ago."
+-> replacement_history["tires"]: "I replaced my tyres one year ago."
+-> temporal_candidates: candidate interval ~1 year ago
+-> Tire_Condition: unknown (does NOT assume tyre is in good condition)
+
+Example B:
+User: "My car has covered around 60 thousand kilometres."
+-> Mileage: 60,000 km recorded in unverified_unit_features and observations.
+
+Example C:
+User: "The battery keeps dying, and I need to charge it frequently."
+-> symptoms["battery"]: "The battery keeps dying, and I need to charge it frequently."
+-> Battery_Status: unknown (no fabricated condition).
+
+Example D:
+User: "I don't know when I last changed the engine oil."
+-> raw_observations: User expressed uncertainty regarding engine oil.
+-> Last_Service_Date: unconfirmed (no fabricated date).
+
+Example E:
+User: "My car is four years old, has run 55,000 kilometres, and I replaced the battery last year."
+-> Vehicle_Age: 4
+-> Mileage: 55,000 km
+-> replacement_history["battery"]: "replaced the battery last year"
+```
+
+---
+
+## 5. Machine Learning & Preprocessing Invariants
+
+- **Authoritative 19-Feature Schema**:
+  - Categoricals (8): `Brake_Condition`, `Battery_Status`, `Tire_Condition`, `Maintenance_History`, `Fuel_Type`, `Transmission_Type`, `Owner_Type`, `Vehicle_Model`.
+  - Numericals (9): `Reported_Issues`, `Vehicle_Age`, `Mileage`, `Odometer_Reading`, `Engine_Size`, `Fuel_Efficiency`, `Insurance_Premium`, `Service_History`, `Accident_History`.
+  - Dates (2): `Last_Service_Date`, `Warranty_Expiry_Date`.
+- **38-Column Preprocessor Matrix**:
+  - `MaintenancePreprocessor` produces an exact $38$-column vector ($19\text{ values} + 19\text{ missingness indicators}$).
+  - Categoricals mapped to ordinal integers (`0.0`, `1.0`, `2.0`); missing imputed to `-1.0` with `_missing = 1`.
+  - Dates converted to ordinal timestamps; missing imputed to `-1.0` with `_missing = 1`.
+- **Model Artifact**:
+  - Trained `RandomForestClassifier` (`models/maintenance_model.joblib`, version 2.0.0).
+  - Accuracy: 96.45% | Precision: 100.00% | ROC-AUC: 1.0000 | F1 Score: 0.9776.
+
+---
+
+## 6. Comprehensive Test Suite
+
+The automated test suite contains **169 tests passing with 0 failures**:
+
+```bash
+# Run all automated tests
+python -m pytest backend/tests/ -v
+
+# Run Universal NLP tests
+python -m pytest backend/tests/test_universal_nlp_intelligence.py -v
+```
+
+### Test Suite Breakdown:
+1. `backend/tests/test_universal_nlp_intelligence.py` (32 tests):
+   - Off-target service timing, coreference resolution, automotive typos, multi-attribute sentences, Specification Examples A–E.
+   - Relative temporal normalization to ISO dates (`YYYY-MM-DD`) with approximation indicators (`is_exact: False`).
+   - `"last year i did"` service timing recognition under `Maintenance_History` without guessing quality.
+   - `"i just changed my battery 2 months ago"` replacement history and timing capture without asserting `"New"`.
+   - `"battery is kind of old"` subjective/vague ambiguity detection without mapping to `"Weak"`.
+   - `"brake is working properly"` mapping to `Brake_Condition = "Good"`.
+   - `"approximately 5"` under `Service_History`, `Reported_Issues`, `Vehicle_Age` with `approximate_features` indicators.
+   - `"no accidents"` mapping to `Accident_History = 0`.
+   - Component age expressions (`"The battery is almost 3 years old."`) prevented from asserting `Vehicle_Age`.
+   - Engine heating symptoms (`"The engine temperature rises during long drives."`) routed to `symptoms["engine"]`.
+   - Unremembered service dates (`"I don't remember when I last serviced my car."`) recorded as `unavailable_features["Last_Service_Date"]`.
+   - Natural language aliases (`"distance driven"`, `"number of services"`, `"number of accidents"`, etc.).
+2. `backend/tests/test_adk_agents.py` (37 tests):
+   - Multi-agent orchestration, hallucination guards, feature coverage across all 19 features.
+3. `backend/tests/test_hypothesis_grounding.py` (19 tests):
+   - Observation grounding, date normalization (`YYYY-MM-DD`), question plan boundary safety.
+4. `backend/tests/test_agent.py` & `test_guards.py` (40 tests):
+   - Domain filtering, prompt injection guards, turn loop prevention.
+5. `backend/tests/test_ml.py` & `test_prediction_consistency.py` (27 tests):
+   - 38-column transformation consistency, partial input inference stability.
+6. `backend/tests/test_emergency_engine.py`, `test_emergency_flow.py`, `test_oauth.py` (14 tests):
+   - Emergency detection, contact management, encrypted Google OAuth token storage.

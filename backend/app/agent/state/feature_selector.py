@@ -37,8 +37,20 @@ def get_askable_features(state: AgentState) -> List[str]:
         if feat_data.get("status") == "known" and feat_data.get("value") is not None:
             continue
 
-        # Check declined status
-        if feat in state.declined_features or feat_data.get("status") == "unavailable":
+        # Check declined status (user explicitly refused)
+        if feat in state.declined_features:
+            continue
+
+        # Check unavailable status (user cannot remember/provide)
+        if feat_data.get("status") == "unavailable" or feat in state.raw_user_inputs.get("unavailable_features", []):
+            continue
+
+        # Check unknown status (user does not know)
+        if feat in state.raw_user_inputs.get("unknown_features", []):
+            continue
+
+        # Check pending status (user will check and provide later)
+        if feat in state.raw_user_inputs.get("pending_features", []):
             continue
 
         askable.append(feat)
